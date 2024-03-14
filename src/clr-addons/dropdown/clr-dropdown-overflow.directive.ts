@@ -4,54 +4,53 @@
  * The full license information can be found in LICENSE in the root directory of this project.
  */
 
-import {
-  AfterContentChecked,
-  ContentChildren,
-  Directive,
-  ElementRef,
-  Input,
-  OnDestroy,
-  QueryList,
-} from '@angular/core';
+import { AfterViewChecked, ContentChildren, Directive, ElementRef, Input, OnDestroy, QueryList } from '@angular/core';
 import { ClrDropdown } from '@clr/angular';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { Subscription } from 'rxjs';
 
 @Directive({ selector: 'clr-dropdown-menu' })
-export class ClrDropdownOverflowDirective implements AfterContentChecked, OnDestroy {
+export class ClrDropdownOverflowDirective implements AfterViewChecked, OnDestroy {
   @Input() clrDropdownMenuMaxHeight: string | number; // can be of px, rem, vh, or a number (which then is considered as px value)
   @Input() clrDropdownMenuItemMinHeight: string | number; // can be of px, rem, vh, or a number (which then is considered as px value)
+
+  @Input()
+  set clrMarginBottom(value: string | number) {
+    this.marginBottomPx = this.convertToPixels(value);
+  }
 
   @ContentChildren(ClrDropdown, { descendants: true }) private nestedDropdownChildren: QueryList<ClrDropdown>;
 
   public readonly defaultItemMinHeightRem = 1.5;
-  public readonly marginBottomRem = 0.1;
 
-  private destroy$ = new Subject<void>();
   private alreadyChecked = false;
-  private heightFix = 27;
+  private marginBottomPx = 2;
+
+  private nestedDropdownSubscription: Subscription;
 
   public constructor(private elRef: ElementRef) {}
 
-  ngAfterContentChecked(): void {
+  ngAfterViewChecked(): void {
     // first trigger manually because the subscription lower only triggers after first change
     if (!this.nestedDropdownChildren?.length) {
       this.applyDropdownOverflowStyles();
     }
 
-    this.nestedDropdownChildren.changes.pipe(takeUntil(this.destroy$)).subscribe((children: QueryList<ClrDropdown>) => {
-      // if there are any nested dropdowns, our overflow fix prevents those from showing and needs to be removed
-      if (!children?.length) {
-        this.applyDropdownOverflowStyles();
-      } else if (children?.length) {
-        this.removeDropdownOverflowStyles();
-      }
-    });
+    if (!this.nestedDropdownSubscription) {
+      this.nestedDropdownSubscription = this.nestedDropdownChildren.changes.subscribe(
+        (children: QueryList<ClrDropdown>) => {
+          // if there are any nested dropdowns, our overflow fix prevents those from showing and needs to be removed
+          if (!children?.length) {
+            this.applyDropdownOverflowStyles();
+          } else if (children?.length) {
+            this.removeDropdownOverflowStyles();
+          }
+        }
+      );
+    }
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.nestedDropdownSubscription?.unsubscribe();
   }
 
   private applyDropdownOverflowStyles(): void {
@@ -63,16 +62,9 @@ export class ClrDropdownOverflowDirective implements AfterContentChecked, OnDest
       for (const item of this.getAllChildDropdownMenuItems()) {
         item.style.minHeight = itemMinHeightPx + 'px';
       }
-      let height = 0;
-      if (y + this.heightFix < window.innerHeight - y) {
-        height = window.innerHeight - y - this.heightFix;
-      } else {
-        height = window.innerHeight - y;
-      }
-
-      this.elRef.nativeElement.style.maxHeight =
-        this.getMenuMaxHeight(this.clrDropdownMenuMaxHeight, height - this.convertRemToPixels(this.marginBottomRem)) +
-        'px';
+      const height = window.innerHeight - y;
+      const maxHeight = this.getMenuMaxHeight(this.clrDropdownMenuMaxHeight, height - this.marginBottomPx);
+      this.elRef.nativeElement.style.maxHeight = maxHeight + 'px';
 
       this.elRef.nativeElement.style.overflowY = 'auto';
       this.alreadyChecked = true;
@@ -86,6 +78,7 @@ export class ClrDropdownOverflowDirective implements AfterContentChecked, OnDest
 
     this.elRef.nativeElement.style.maxHeight = null;
     this.elRef.nativeElement.style.overflowY = null;
+    this.alreadyChecked = false;
   }
 
   private getAllChildDropdownMenuItems() {
